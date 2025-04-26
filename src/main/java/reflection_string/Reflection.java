@@ -1,68 +1,116 @@
 package reflection_string;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 public class Reflection {
-    public static String toString(Object obj) {
-        Set<Object> visited = new HashSet<>();
-        return toStringHelper(obj, visited);
+    public static String toString(Object object) {
+        if (object == null) {
+            return "";
+        }
+        Map<Object, Boolean> visited = new IdentityHashMap<>();
+        return toStringHelper(object, visited);
     }
 
-    private static String toStringHelper(Object obj, Set<Object> visited) {
-        if (obj == null) {
-            return "null";
+    private static String toStringHelper(Object object, Map<Object, Boolean> visited) {
+        if (visited.containsKey(object)) {
+            return "[...]";
         }
 
-        if (visited.contains(obj)) {
-            return "[cyclic reference]";
-        }
+        visited.put(object, true);
 
-        visited.add(obj);
+        Class<?> clazz = object.getClass();
+        StringBuilder builder = new StringBuilder();
 
-        StringBuilder result = new StringBuilder();
-        Class<?> clazz = obj.getClass();
+        if (clazz.isArray()) {
+            builder.append("[");
+            int length = Array.getLength(object);
+            for (int i = 0; i < length; i++) {
+                if (i > 0) builder.append(", ");
+                Object element = Array.get(object, i);
+                if (element == null) {
+                    builder.append("null");
+                } else if (isPrimitiveOrWrapper(element)) {
+                    builder.append(element);
+                } else {
+                    builder.append(toStringHelper(element, visited));
+                }
+            }
+            builder.append("]");
+        } else {
+            if (clazz.getName().startsWith("java.")) {
+                builder.append(clazz.getSimpleName()).append("@").append(Integer.toHexString(object.hashCode()));
+            } else {
+                builder.append(clazz.getSimpleName()).append("{");
 
-        result.append(clazz.getName()).append(" {");
+                Field[] fields = clazz.getDeclaredFields();
+                boolean firstField = true;
 
-        Field[] fields = clazz.getDeclaredFields();
-        for (int i = 0; i < fields.length; i++) {
-            Field field = fields[i];
-            field.setAccessible(true);
+                for (Field field : fields) {
+                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers()) ||
+                            java.lang.reflect.Modifier.isFinal(field.getModifiers())) {
+                        continue;
+                    }
 
-            String fieldName = field.getName();
-            Object fieldValue;
-            try {
-                fieldValue = field.get(obj);
+                    if (!firstField) builder.append(", ");
+                    firstField = false;
 
-                if (fieldValue != null && !isPrimitiveOrWrapper(fieldValue.getClass())) {
-                    fieldValue = toStringHelper(fieldValue, visited);
+                    String fieldName = field.getName();
+
+                    try {
+                        field.setAccessible(true);
+
+
+                        Object fieldValue = field.get(object);
+                        if (fieldValue == null) {
+                            builder.append(fieldName).append("=null");
+                        } else if (isPrimitiveOrWrapper(fieldValue)) {
+                            builder.append(fieldName).append("=").append(fieldValue);
+                        } else if (field.getType().isArray()) {
+                            builder.append(fieldName).append("=").append(toStringHelper(fieldValue, visited));
+                        } else {
+                            builder.append(fieldName).append("=").append(toStringHelper(fieldValue, visited));
+                        }
+                    } catch (IllegalAccessException exception) {
+                        builder.append(fieldName).append("=<inaccessible>");
+                    }
                 }
 
-                result.append(fieldName).append("=").append(fieldValue);
-
-                if (i < fields.length - 1) {
-                    result.append(", ");
-                }
-            } catch (IllegalAccessException e) {
-                result.append(fieldName).append("=[inaccessible]");
+                builder.append("}");
             }
         }
 
-        result.append("}");
-        return result.toString();
+        visited.remove(object);
+
+        return builder.toString();
+    }
+    private static boolean isPrimitiveOrWrapper(Object obj) {
+        return obj instanceof Number || obj instanceof Character || obj instanceof Boolean || obj instanceof String;
     }
 
-    private static boolean isPrimitiveOrWrapper(Class<?> target) {
-        return target.isPrimitive() ||
-                target == Integer.class ||
-                target == Long.class ||
-                target == Double.class ||
-                target == Float.class ||
-                target == Boolean.class ||
-                target == Character.class ||
-                target == Byte.class ||
-                target == Short.class;
+    static  class Example {
+        int[] values = new int[]{1,2,3,4,5};
+        String name = "Example";
+        Map<String, String> map = new HashMap<>();
+        Example next;
+
+        public Example(int[] values, String name) {
+            this.values = values;
+            this.name = name;
+            map.put("key1", "value1");
+            map.put("key2", "value2");
+        }
+    }
+
+    public static void main(String[] args) {
+        Example example1 = new Example(new int[]{1,2,3,4,5}, "Example1");
+        Example example2 = new Example(new int[]{5,6,78}, "Example2");
+        example1.next = example2;
+        example2.next = example1;
+        System.out.println(toString(example1));
     }
 }
+
